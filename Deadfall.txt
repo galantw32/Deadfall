@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEADFALL — Nuclear Crisis Simulation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&family=Crimson+Pro:ital,wght@0,300;0,400;1,300;1,400&display=swap');
+
+  :root {
+    --red: #c0392b;
+    --red-dim: #7b241c;
+    --amber: #d4a017;
+    --amber-dim: #8a6800;
+    --green: #1a7a4a;
+    --green-bright: #27ae60;
+    --bg: #050505;
+    --surface: #0a0a0a;
+    --surface2: #111111;
+    --border: #1c1c1c;
+    --text: #c8c0b4;
+    --text-dim: #5a5550;
+    --white: #e8e0d4;
+    --scanline-opacity: 0.04;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+    cursor: default;
+  }
+
+  /* Scanlines overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Screen flicker */
+  @keyframes flicker {
+    0%, 95%, 100% { opacity: 1; }
+    96% { opacity: 0.92; }
+    97% { opacity: 1; }
+    98% { opacity: 0.95; }
+  }
+  body { animation: flicker 8s infinite; }
+
+  @keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(192,57,43,0.4); }
+    50% { box-shadow: 0 0 20px 4px rgba(192,57,43,0.2); }
+  }
+
+  @keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+
+  @keyframes slide-in-left {
+    from { transform: translateX(-40px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  @keyframes slide-in-right {
+    from { transform: translateX(40px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  @keyframes slide-in-up {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+
+  @keyframes typewriter {
+    from { width: 0; }
+    to { width: 100%; }
+  }
+
+  @keyframes glow-amber {
+    0%, 100% { text-shadow: 0 0 8px rgba(212,160,23,0.6); }
+    50% { text-shadow: 0 0 20px rgba(212,160,23,1), 0 0 40px rgba(212,160,23,0.4); }
+  }
+
+  #boot-screen {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    transition: opacity 0.8s;
+  }
+
+  #boot-screen.fade-out { opacity: 0; pointer-events: none; }
+
+  .boot-logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(60px, 10vw, 120px);
+    letter-spacing: 0.15em;
+    color: var(--white);
+    text-shadow: 0 0 60px rgba(200,192,180,0.3);
+    margin-bottom: 8px;
+  }
+
+  .boot-sub {
+    font-size: 11px;
+    letter-spacing: 0.5em;
+    color: var(--text-dim);
+    margin-bottom: 60px;
+    text-transform: uppercase;
+  }
+
+  .boot-log {
+    width: 420px;
+    max-width: 90vw;
+    font-size: 11px;
+    color: #3a7a3a;
+    line-height: 1.8;
+    text-align: left;
+  }
+
+  .boot-log .line { opacity: 0; }
+  .boot-log .line.show { opacity: 1; }
+
+  .boot-start {
+    margin-top: 40px;
+    background: none;
+    border: 1px solid var(--red);
+    color: var(--red);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    padding: 14px 40px;
+    cursor: pointer;
+    transition: all 0.2s;
+    opacity: 0;
+    text-transform: uppercase;
+  }
+
+  .boot-start:hover {
+    background: var(--red);
+    color: #fff;
+    box-shadow: 0 0 30px rgba(192,57,43,0.5);
+  }
+
+  .boot-start.show { opacity: 1; animation: pulse-red 2s infinite; }
+
+  /* MAIN GAME LAYOUT */
+  #game {
+    display: none;
+    min-height: 100vh;
+    flex-direction: column;
+  }
+
+  #game.active { display: flex; }
+
+  /* TOP BAR */
+  .top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    animation: slide-in-up 0.5s ease;
+  }
+
+  .top-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .classification {
+    font-size: 10px;
+    letter-spacing: 0.4em;
+    color: var(--red);
+    border: 1px solid var(--red);
+    padding: 3px 8px;
+    animation: glow-amber 2s infinite;
+  }
+
+  .op-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 0.2em;
+    color: var(--white);
+  }
+
+  .timer-block {
+    text-align: center;
+  }
+
+  .timer-label {
+    font-size: 9px;
+    letter-spacing: 0.4em;
+    color: var(--text-dim);
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  .timer-value {
+    font-size: 28px;
+    color: var(--amber);
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 20px rgba(212,160,23,0.5);
+  }
+
+  .timer-value.urgent { color: var(--red); text-shadow: 0 0 20px rgba(192,57,43,0.7); animation: glow-amber 0.5s infinite; }
+
+  .top-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    animation: blink 1s infinite;
+    display: inline-block;
+    margin-right: 6px;
+  }
+
+  /* MAIN CONTENT */
+  .main-content {
+    display: grid;
+    grid-template-columns: 320px 1fr 300px;
+    flex: 1;
+    gap: 0;
+  }
+
+  /* PANELS */
+  .panel {
+    border-right: 1px solid var(--border);
+    padding: 20px;
+    overflow-y: auto;
+    max-height: calc(100vh - 120px);
+  }
+
+  .panel:last-child { border-right: none; }
+
+  .panel-title {
+    font-size: 9px;
+    letter-spacing: 0.5em;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  /* ADVISORS */
+  .advisor-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 14px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    animation: slide-in-left 0.4s ease both;
+  }
+
+  .advisor-card:hover {
+    border-color: var(--amber-dim);
+    background: #141414;
+  }
+
+  .advisor-card.selected {
+    border-color: var(--amber);
+    background: #141200;
+  }
+
+  .advisor-card.selected::before {
+    content: '▶';
+    position: absolute;
+    right: 12px;
+    top: 14px;
+    color: var(--amber);
+    font-size: 10px;
+  }
+
+  .advisor-card.briefed { border-color: var(--green); opacity: 0.7; }
+
+  .advisor-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 0.1em;
+    color: var(--white);
+    margin-bottom: 2px;
+  }
+
+  .advisor-title {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.15em;
+    margin-bottom: 8px;
+  }
+
+  .advisor-stance {
+    font-size: 10px;
+    padding: 2px 8px;
+    display: inline-block;
+    letter-spacing: 0.1em;
+  }
+
+  .stance-hawk { background: rgba(192,57,43,0.15); color: var(--red); border: 1px solid var(--red-dim); }
+  .stance-dove { background: rgba(26,122,74,0.15); color: var(--green-bright); border: 1px solid var(--green); }
+  .stance-moderate { background: rgba(212,160,23,0.15); color: var(--amber); border: 1px solid var(--amber-dim); }
+
+  .advisor-trust {
+    margin-top: 8px;
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+  }
+
+  .trust-bar {
+    height: 2px;
+    background: var(--border);
+    margin-top: 4px;
+    position: relative;
+  }
+
+  .trust-fill {
+    height: 100%;
+    background: var(--amber);
+    transition: width 0.5s;
+  }
+
+  /* CENTER PANEL */
+  .center-panel {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+  }
+
+  /* INTEL FEED */
+  .intel-feed {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    max-height: calc(100vh - 280px);
+  }
+
+  .intel-message {
+    margin-bottom: 20px;
+    animation: slide-in-up 0.3s ease both;
+    position: relative;
+  }
+
+  .intel-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+  }
+
+  .intel-sender {
+    color: var(--amber);
+  }
+
+  .intel-body {
+    font-family: 'Crimson Pro', serif;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--white);
+    font-style: italic;
+    border-left: 2px solid var(--border);
+    padding-left: 14px;
+  }
+
+  .intel-body.critical {
+    border-left-color: var(--red);
+    color: #e8c8c0;
+  }
+
+  .intel-body.conflicting {
+    border-left-color: var(--amber);
+  }
+
+  .intel-tag {
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    margin-top: 6px;
+    display: inline-block;
+    padding: 1px 6px;
+  }
+
+  .tag-red { color: var(--red); border: 1px solid var(--red-dim); }
+  .tag-amber { color: var(--amber); border: 1px solid var(--amber-dim); }
+  .tag-green { color: var(--green-bright); border: 1px solid var(--green); }
+
+  /* SUSPECT COUNTRIES */
+  .suspects-panel {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .suspects-title {
+    font-size: 9px;
+    letter-spacing: 0.4em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  .suspects-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  .suspect-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 10px 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+
+  .suspect-card:hover {
+    border-color: var(--red);
+    background: #0f0808;
+  }
+
+  .suspect-card.selected {
+    border-color: var(--red);
+    background: #150000;
+    box-shadow: 0 0 15px rgba(192,57,43,0.2);
+  }
+
+  .suspect-flag {
+    font-size: 22px;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .suspect-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--white);
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  .suspect-prob {
+    font-size: 9px;
+    color: var(--text-dim);
+    display: block;
+  }
+
+  .suspect-prob.high { color: var(--red); }
+  .suspect-prob.med { color: var(--amber); }
+  .suspect-prob.low { color: var(--green-bright); }
+
+  /* RIGHT PANEL */
+  .right-panel {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* SITUATION MAP */
+  .sit-map {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    height: 160px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sit-map-bg {
+    position: absolute;
+    inset: 0;
+    background: 
+      radial-gradient(ellipse at 30% 50%, rgba(192,57,43,0.05) 0%, transparent 60%),
+      radial-gradient(ellipse at 70% 30%, rgba(26,122,74,0.03) 0%, transparent 50%);
+  }
+
+  .radar-ring {
+    position: absolute;
+    border: 1px solid rgba(26,122,74,0.2);
+    border-radius: 50%;
+    animation: radar-pulse 3s infinite;
+  }
+
+  @keyframes radar-pulse {
+    0% { transform: scale(0.3); opacity: 0.8; }
+    100% { transform: scale(1.5); opacity: 0; }
+  }
+
+  .radar-dot {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 10px var(--red);
+  }
+
+  .map-label {
+    font-size: 8px;
+    color: var(--text-dim);
+    letter-spacing: 0.3em;
+    position: absolute;
+    bottom: 6px;
+    left: 8px;
+  }
+
+  /* TRUST SCORES */
+  .advisor-trusts h4 {
+    font-size: 9px;
+    letter-spacing: 0.4em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  .trust-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 10px;
+  }
+
+  .trust-name { color: var(--text); }
+  .trust-pct { color: var(--amber); font-size: 9px; }
+
+  /* EVIDENCE LOG */
+  .evidence-log h4 {
+    font-size: 9px;
+    letter-spacing: 0.4em;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .evidence-item {
+    font-size: 10px;
+    color: var(--text);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.5;
+  }
+
+  .evidence-item:last-child { border-bottom: none; }
+
+  /* DECISION PANEL */
+  .decision-panel {
+    background: var(--surface);
+    border-top: 2px solid var(--red-dim);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    animation: slide-in-up 0.5s ease;
+  }
+
+  .decision-label {
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .decision-target {
+    flex: 1;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 20px;
+    letter-spacing: 0.2em;
+    color: var(--red);
+    text-shadow: 0 0 20px rgba(192,57,43,0.5);
+  }
+
+  .decision-target.empty { color: var(--text-dim); font-size: 14px; font-family: 'Share Tech Mono'; }
+
+  .btn-brief {
+    background: none;
+    border: 1px solid var(--amber-dim);
+    color: var(--amber);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn-brief:hover {
+    background: rgba(212,160,23,0.1);
+    border-color: var(--amber);
+  }
+
+  .btn-launch {
+    background: var(--red);
+    border: 1px solid #e74c3c;
+    color: #fff;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 0.3em;
+    padding: 10px 28px;
+    cursor: pointer;
+    transition: all 0.2s;
+    animation: pulse-red 2s infinite;
+  }
+
+  .btn-launch:hover {
+    background: #e74c3c;
+    box-shadow: 0 0 30px rgba(231,76,60,0.5);
+    transform: scale(1.02);
+  }
+
+  .btn-launch:disabled {
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text-dim);
+    animation: none;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* OUTCOME SCREEN */
+  #outcome {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.95);
+    z-index: 500;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    animation: slide-in-up 0.5s ease;
+  }
+
+  #outcome.show { display: flex; }
+
+  .outcome-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(48px, 8vw, 90px);
+    letter-spacing: 0.2em;
+    margin-bottom: 16px;
+  }
+
+  .outcome-title.success { color: var(--amber); text-shadow: 0 0 40px rgba(212,160,23,0.5); }
+  .outcome-title.failure { color: var(--red); text-shadow: 0 0 40px rgba(192,57,43,0.6); animation: shake 0.5s; }
+
+  .outcome-body {
+    font-family: 'Crimson Pro', serif;
+    font-size: 18px;
+    color: var(--text);
+    max-width: 600px;
+    text-align: center;
+    line-height: 1.8;
+    margin-bottom: 30px;
+    font-style: italic;
+  }
+
+  .outcome-details {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+    max-width: 500px;
+    text-align: center;
+    line-height: 2;
+    margin-bottom: 40px;
+  }
+
+  .btn-restart {
+    background: none;
+    border: 1px solid var(--text-dim);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.4em;
+    padding: 12px 30px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn-restart:hover { border-color: var(--white); color: var(--white); }
+
+  /* BRIEFING MODAL */
+  #briefing-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    z-index: 400;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #briefing-modal.show { display: flex; }
+
+  .briefing-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    max-width: 560px;
+    width: 90%;
+    padding: 30px;
+    animation: slide-in-up 0.3s ease;
+    position: relative;
+  }
+
+  .briefing-advisor {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 0.15em;
+    color: var(--white);
+    margin-bottom: 4px;
+  }
+
+  .briefing-title {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.3em;
+    margin-bottom: 20px;
+  }
+
+  .briefing-text {
+    font-family: 'Crimson Pro', serif;
+    font-size: 16px;
+    line-height: 1.9;
+    color: var(--text);
+    font-style: italic;
+    margin-bottom: 20px;
+  }
+
+  .briefing-recommendation {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 12px;
+    margin-bottom: 20px;
+  }
+
+  .rec-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.3em;
+    margin-bottom: 6px;
+  }
+
+  .rec-text {
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: var(--amber);
+  }
+
+  .briefing-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+  }
+
+  .btn-trust {
+    background: rgba(26,122,74,0.15);
+    border: 1px solid var(--green);
+    color: var(--green-bright);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-trust:hover { background: rgba(26,122,74,0.3); }
+
+  .btn-dismiss {
+    background: rgba(192,57,43,0.1);
+    border: 1px solid var(--red-dim);
+    color: var(--red);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-dismiss:hover { background: rgba(192,57,43,0.2); }
+
+  .close-modal {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 18px;
+    cursor: pointer;
+  }
+
+  /* BLINKING CURSOR */
+  .cursor { animation: blink 1s infinite; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .intro-text {
+    max-width: 500px;
+    text-align: center;
+    font-family: 'Crimson Pro', serif;
+    font-size: 14px;
+    color: var(--text-dim);
+    font-style: italic;
+    line-height: 1.8;
+    margin-bottom: 30px;
+  }
+</style>
+</head>
+<body>
+
+<!-- BOOT SCREEN -->
+<div id="boot-screen">
+  <div class="boot-logo">DEADFALL</div>
+  <div class="boot-sub">Presidential Crisis Simulation — Eyes Only</div>
+  <p class="intro-text">"When the stick of dynamite has already been lit, the question is never whether it will explode — only who you allow to hold it."</p>
+  <div class="boot-log" id="boot-log"></div>
+  <button class="boot-start" id="boot-start" onclick="startGame()">ENTER SITUATION ROOM</button>
+</div>
+
+<!-- MAIN GAME -->
+<div id="game">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div class="top-left">
+      <span class="classification">TOP SECRET / CODEWORD</span>
+      <span class="op-name">OPERATION DEADFALL</span>
+    </div>
+    <div class="timer-block">
+      <span class="timer-label">DECISION WINDOW</span>
+      <span class="timer-value" id="timer">08:00</span>
+    </div>
+    <div class="top-right">
+      <span><span class="status-dot"></span>DEFCON 2 — STANDBY</span>
+      <span id="date-display"></span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main-content">
+
+    <!-- LEFT: ADVISORS -->
+    <div class="panel" id="advisors-panel">
+      <div class="panel-title">War Cabinet — Joint Chiefs</div>
+      <div id="advisor-list"></div>
+    </div>
+
+    <!-- CENTER -->
+    <div class="center-panel">
+      <div class="intel-feed" id="intel-feed">
+        <div class="panel-title">LIVE INTEL FEED</div>
+      </div>
+      <div class="suspects-panel">
+        <div class="suspects-title">THREAT ORIGIN — PRIMARY SUSPECTS</div>
+        <div class="suspects-grid" id="suspects-grid"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="panel right-panel">
+      <div class="panel-title">SITUATION ROOM</div>
+
+      <div class="sit-map">
+        <div class="sit-map-bg"></div>
+        <div class="radar-ring" style="width:60px;height:60px;top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:0s;"></div>
+        <div class="radar-ring" style="width:60px;height:60px;top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:1s;"></div>
+        <div class="radar-ring" style="width:60px;height:60px;top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:2s;"></div>
+        <div class="radar-dot" style="top:48%;left:46%;" title="Inbound trajectory"></div>
+        <div class="map-label">RADAR — NORAD TRACK 7741</div>
+      </div>
+
+      <div class="advisor-trusts" id="trust-display">
+        <h4>ADVISOR RELIABILITY INDEX</h4>
+      </div>
+
+      <div class="evidence-log">
+        <h4>EVIDENCE COLLECTED</h4>
+        <div id="evidence-list"><div class="evidence-item" style="color:var(--text-dim);font-size:10px;">No conclusive evidence yet.<br>Brief your cabinet members.</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- DECISION BAR -->
+  <div class="decision-panel">
+    <span class="decision-label">STRIKE TARGET:</span>
+    <span class="decision-target empty" id="decision-target">NO TARGET SELECTED</span>
+    <button class="btn-brief" onclick="showAllAdvisors()">HOLD CABINET SESSION</button>
+    <button class="btn-launch" id="launch-btn" disabled onclick="launchStrike()">⬛ AUTHORIZE STRIKE</button>
+  </div>
+
+</div>
+
+<!-- BRIEFING MODAL -->
+<div id="briefing-modal">
+  <div class="briefing-box">
+    <button class="close-modal" onclick="closeBriefing()">✕</button>
+    <div class="briefing-advisor" id="b-name"></div>
+    <div class="briefing-title" id="b-title"></div>
+    <div class="briefing-text" id="b-text"></div>
+    <div class="briefing-recommendation">
+      <div class="rec-label">RECOMMENDATION</div>
+      <div class="rec-text" id="b-rec"></div>
+    </div>
+    <div class="briefing-actions">
+      <button class="btn-dismiss" onclick="dismissAdvisor()">DISREGARD INTEL</button>
+      <button class="btn-trust" onclick="trustAdvisor()">ACCEPT INTEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- OUTCOME -->
+<div id="outcome">
+  <div class="outcome-title" id="outcome-title"></div>
+  <div class="outcome-body" id="outcome-body"></div>
+  <div class="outcome-details" id="outcome-details"></div>
+  <button class="btn-restart" onclick="restartGame()">NEW SESSION</button>
+</div>
+
+<script>
+// ============================================================
+//  GAME DATA
+// ============================================================
+
+const ADVISORS = [
+  {
+    id: 'hayes',
+    name: 'GEN. MARCUS HAYES',
+    title: 'Chairman, Joint Chiefs of Staff',
+    stance: 'hawk',
+    stanceLabel: 'HAWK',
+    trustLevel: 75,
+    reliable: true,
+    briefings: [
+      {
+        text: `Sir, we have tracking data from three separate NORAD stations. The missile trajectory originated from grid sector 47-Bravo, which falls within established launch corridors used by North Korean strategic assets during their 2019 exercises. Our satellite caught thermal bloom consistent with a KN-28 ICBM at 0341 hours.`,
+        rec: 'RETALIATE AGAINST: NORTH KOREA',
+        target: 'NORTH KOREA',
+        evidenceAdded: 'NORAD thermal bloom matches KN-28 signature — trajectory consistent with North Korean launch corridor.'
+      },
+      {
+        text: `Mr. President, I've been in this chair through three administrations. When I tell you the ballistics don't lie, I mean it. That missile came from the Korean Peninsula. Every hour we delay is a signal of weakness that emboldens their high command to send another one.`,
+        rec: 'RETALIATE AGAINST: NORTH KOREA — IMMEDIATE',
+        target: 'NORTH KOREA',
+        evidenceAdded: 'Joint Chiefs confirm: ballistic profile matches KN-28 within 94% confidence interval.'
+      }
+    ]
+  },
+  {
+    id: 'chen',
+    name: 'DR. ELEANOR CHEN',
+    title: 'Director, Central Intelligence Agency',
+    stance: 'moderate',
+    stanceLabel: 'MODERATE',
+    trustLevel: 60,
+    reliable: true,
+    briefings: [
+      {
+        text: `Mr. President, the intelligence picture is... murkier than the generals are letting on. We have a HUMINT asset inside Pyongyang who says Kim's command structure showed no signs of a launch order in the preceding 72 hours. That's unusual. A missile doesn't fire itself.`,
+        rec: 'WITHHOLD STRIKE — FURTHER VERIFICATION NEEDED',
+        target: null,
+        evidenceAdded: 'CIA HUMINT: No launch order observed from Pyongyang command in 72-hour pre-incident window.'
+      },
+      {
+        text: `My concern, sir, is the spoofing scenario. We've documented Russian and Chinese capability to mimic ballistic trajectories. If someone wants us to fire first and be wrong — this is exactly what it would look like. There's a third party pulling the string here.`,
+        rec: 'INVESTIGATE: POTENTIAL FALSE FLAG OPERATION',
+        target: null,
+        evidenceAdded: 'CIA assesses non-zero probability of false flag operation by state actor with trajectory spoofing capability.'
+      }
+    ]
+  },
+  {
+    id: 'morrison',
+    name: 'ADM. DIANE MORRISON',
+    title: 'Chief of Naval Operations',
+    stance: 'moderate',
+    stanceLabel: 'MODERATE',
+    trustLevel: 55,
+    reliable: true,
+    briefings: [
+      {
+        text: `We had the USS Roosevelt on patrol in the Yellow Sea. At 0338, her sonar crew picked up submarine acoustic signatures that didn't match North Korean boats. I've listened to those tapes personally, Mr. President. What they heard was an Akula-class — Russian. Three minutes before the launch.`,
+        rec: 'INVESTIGATE: RUSSIA — POSSIBLE ORIGIN STATE',
+        target: 'RUSSIA',
+        evidenceAdded: 'USS Roosevelt sonar: Akula-class Russian submarine acoustic signature 3 min prior to launch.'
+      }
+    ]
+  },
+  {
+    id: 'rashid',
+    name: 'SEC. JAMES RASHID',
+    title: 'Secretary of Defense',
+    stance: 'hawk',
+    stanceLabel: 'HAWK',
+    trustLevel: 50,
+    reliable: false,
+    briefings: [
+      {
+        text: `Mr. President, I'm going to be frank with you. Our intelligence on Iran's long-range program has been understated for years — deliberately, I believe. The missile's yield on impact suggests a test of Iranian miniaturization. This has Tehran written all over it. I've been saying for years they were closer than we thought.`,
+        rec: 'RETALIATE AGAINST: IRAN',
+        target: 'IRAN',
+        evidenceAdded: 'SecDef assessment: warhead yield profile consistent with Iranian miniaturization program. Source credibility: DISPUTED.'
+      },
+      {
+        text: `I've spoken with three of my counterparts in allied defense ministries this morning. None of them are buying the North Korea narrative. The consensus in the room — off the record — is that this has the hallmarks of Iranian state action, a calculated bet that we'd blame Pyongyang.`,
+        rec: 'RETALIATE AGAINST: IRAN — ALLIED CONSENSUS',
+        target: 'IRAN',
+        evidenceAdded: 'SecDef claims allied defense minister consensus points to Iran. UNVERIFIED — Allied channels deny briefing SecDef.'
+      }
+    ]
+  },
+  {
+    id: 'wallis',
+    name: 'AMB. SANDRA WALLIS',
+    title: 'National Security Advisor',
+    stance: 'dove',
+    stanceLabel: 'DOVE',
+    trustLevel: 65,
+    reliable: true,
+    briefings: [
+      {
+        text: `Mr. President, I've been on the phone with our embassy in Moscow for the past two hours. The Kremlin has been aggressively trying to reach our State Department — that's not the behavior of a country that just attacked us. Russia wants this to stay contained. Something else is at play here.`,
+        rec: 'DO NOT STRIKE — DIPLOMATIC CHANNEL ACTIVE',
+        target: null,
+        evidenceAdded: 'Russian Kremlin initiated back-channel contact within 90 min of incident. Unusual if they are responsible.'
+      },
+      {
+        text: `The North Korean angle troubles me deeply. Their leadership has never shown suicidal ideation — this is a regime that prioritizes survival above all else. A surprise nuclear attack on the continental United States would be regime suicide. Nothing in Kim's psychological profile supports this.`,
+        rec: 'DO NOT STRIKE NORTH KOREA — PROFILE INCONSISTENCY',
+        target: null,
+        evidenceAdded: 'NSA psychological assessment: Kim regime profile inconsistent with unprovoked first strike on CONUS.'
+      }
+    ]
+  },
+  {
+    id: 'petrov',
+    name: 'GEN. CARL OSTERMANN',
+    title: 'Director, Defense Intelligence Agency',
+    stance: 'hawk',
+    stanceLabel: 'HAWK',
+    trustLevel: 40,
+    reliable: false,
+    briefings: [
+      {
+        text: `Mr. President, I'm going to say what everyone else is afraid to say. Our signals intelligence picked up encrypted traffic between Beijing and a non-state actor network twenty-two hours before the launch. China has been funding North Korean weapons development for a decade. This attack was a proxy operation, and China holds the real string.`,
+        rec: 'RETALIATE AGAINST: CHINA — PROXY OPERATION',
+        target: 'CHINA',
+        evidenceAdded: 'DIA: Encrypted Beijing-to-NK comms 22 hrs prior. ANALYST NOTE: Signal authenticity unverified — possible plant.'
+      }
+    ]
+  }
+];
+
+const SUSPECTS = [
+  { id: 'nk', name: 'North Korea', flag: '🇰🇵', actualGuilty: false, initialProb: 'HIGH', probClass: 'high' },
+  { id: 'ru', name: 'Russia', flag: '🇷🇺', actualGuilty: true, initialProb: 'MODERATE', probClass: 'med' },
+  { id: 'ir', name: 'Iran', flag: '🇮🇷', actualGuilty: false, initialProb: 'LOW', probClass: 'low' },
+  { id: 'cn', name: 'China', flag: '🇨🇳', actualGuilty: false, initialProb: 'LOW', probClass: 'low' },
+];
+
+// ============================================================
+//  GAME STATE
+// ============================================================
+let state = {
+  timer: 480,
+  timerInterval: null,
+  selectedTarget: null,
+  selectedAdvisor: null,
+  advisorBriefCounts: {},
+  trustedAdvisors: [],
+  dismissedAdvisors: [],
+  evidenceList: [],
+  briefingIndex: {},
+  launched: false
+};
+
+// ============================================================
+//  BOOT SEQUENCE
+// ============================================================
+const bootLines = [
+  '> INITIALIZING SECURE CHANNEL...',
+  '> CONNECTING TO SITUATION ROOM — ENCRYPTED',
+  '> BIOMETRIC CLEARANCE: CONFIRMED',
+  '> DEFCON STATUS: 2 — WEAPONS READY',
+  '> NUCLEAR BRIEFCASE: ONLINE',
+  '> WARNING: UNAUTHORIZED ACCESS IS PUNISHABLE UNDER EXECUTIVE ORDER 13587',
+  '> LOADING CRISIS PROTOCOL DELTA...',
+  '> ALL SYSTEMS NOMINAL',
+  '> WELCOME, MR. PRESIDENT.',
+];
+
+window.onload = function() {
+  let i = 0;
+  const log = document.getElementById('boot-log');
+  const btn = document.getElementById('boot-start');
+  
+  function showLine() {
+    if (i < bootLines.length) {
+      const el = document.createElement('div');
+      el.className = 'line show';
+      el.textContent = bootLines[i++];
+      log.appendChild(el);
+      setTimeout(showLine, 280);
+    } else {
+      setTimeout(() => btn.classList.add('show'), 400);
+    }
+  }
+  showLine();
+
+  // Date
+  document.getElementById('date-display').textContent = 
+    new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).toUpperCase() + ' — 03:47 EST';
+};
+
+function startGame() {
+  const boot = document.getElementById('boot-screen');
+  boot.classList.add('fade-out');
+  setTimeout(() => {
+    boot.style.display = 'none';
+    document.getElementById('game').classList.add('active');
+    initGame();
+  }, 800);
+}
+
+// ============================================================
+//  INIT GAME
+// ============================================================
+function initGame() {
+  state.advisorBriefCounts = {};
+  state.briefingIndex = {};
+  ADVISORS.forEach(a => {
+    state.advisorBriefCounts[a.id] = 0;
+    state.briefingIndex[a.id] = 0;
+  });
+
+  renderAdvisors();
+  renderSuspects();
+  renderTrustDisplay();
+  startIntelFeed();
+  startTimer();
+}
+
+// ============================================================
+//  TIMER
+// ============================================================
+function startTimer() {
+  state.timerInterval = setInterval(() => {
+    state.timer--;
+    const mins = Math.floor(state.timer / 60).toString().padStart(2,'0');
+    const secs = (state.timer % 60).toString().padStart(2,'0');
+    const el = document.getElementById('timer');
+    el.textContent = `${mins}:${secs}`;
+    if (state.timer <= 60) el.classList.add('urgent');
+    if (state.timer <= 0) {
+      clearInterval(state.timerInterval);
+      forceDecision();
+    }
+  }, 1000);
+}
+
+function forceDecision() {
+  if (state.launched) return;
+  if (state.selectedTarget) {
+    launchStrike();
+  } else {
+    showOutcome('WINDOW CLOSED', false, 
+      'The decision window elapsed without authorization. The National Security Council has convened an emergency session. The missile struck an uninhabited coastal region — for now.',
+      'Your failure to act in time has been classified. Congressional oversight committees are demanding answers. The world watches. A second launch may be imminent.'
+    );
+  }
+}
+
+// ============================================================
+//  RENDER ADVISORS
+// ============================================================
+function renderAdvisors() {
+  const list = document.getElementById('advisor-list');
+  list.innerHTML = '';
+  ADVISORS.forEach((adv, i) => {
+    const card = document.createElement('div');
+    card.className = 'advisor-card';
+    card.style.animationDelay = `${i * 0.08}s`;
+    card.id = `adv-${adv.id}`;
+    card.onclick = () => openBriefing(adv.id);
+
+    const briefed = state.briefingIndex[adv.id] >= adv.briefings.length;
+    if (briefed) card.classList.add('briefed');
+
+    card.innerHTML = `
+      <div class="advisor-name">${adv.name}</div>
+      <div class="advisor-title">${adv.title}</div>
+      <span class="advisor-stance stance-${adv.stance}">${adv.stanceLabel}</span>
+      <div class="advisor-trust">
+        INTELLIGENCE RELIABILITY
+        <div class="trust-bar"><div class="trust-fill" style="width:${adv.trustLevel}%"></div></div>
+      </div>
+      <div style="font-size:9px;color:var(--text-dim);margin-top:8px;">${briefed ? '✓ BRIEFING COMPLETE' : 'CLICK TO REQUEST BRIEFING'}</div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+// ============================================================
+//  RENDER SUSPECTS
+// ============================================================
+function renderSuspects() {
+  const grid = document.getElementById('suspects-grid');
+  grid.innerHTML = '';
+  SUSPECTS.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'suspect-card';
+    card.id = `sus-${s.id}`;
+    card.onclick = () => selectTarget(s);
+    card.innerHTML = `
+      <span class="suspect-flag">${s.flag}</span>
+      <span class="suspect-name">${s.name}</span>
+      <span class="suspect-prob ${s.probClass}">${s.initialProb}</span>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+// ============================================================
+//  SELECT TARGET
+// ============================================================
+function selectTarget(suspect) {
+  state.selectedTarget = suspect;
+  document.querySelectorAll('.suspect-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById(`sus-${suspect.id}`).classList.add('selected');
+  
+  const dtEl = document.getElementById('decision-target');
+  dtEl.textContent = `${suspect.flag} ${suspect.name.toUpperCase()}`;
+  dtEl.classList.remove('empty');
+
+  document.getElementById('launch-btn').disabled = false;
+
+  addIntel('SYSTEM', `Strike target locked: ${suspect.name}. Presidential authorization required to proceed.`, 'critical', 'TAG-RED', 'TARGETING LOCK');
+}
+
+// ============================================================
+//  INTEL FEED
+// ============================================================
+const AUTO_INTEL = [
+  { sender: 'NORAD COMMAND', text: 'Inbound missile confirmed. Single warhead. Detonation confirmed at 03:41 EST over uninhabited Nevada test range — possible warning shot or targeting malfunction. Yield estimated 15 kilotons.', type: 'critical', tag: 'CONFIRMED', tagClass: 'tag-red', delay: 1000 },
+  { sender: 'NSA SIGNALS', text: 'Encrypted burst transmission detected 4 minutes prior to launch from an unknown origin. Signal pattern does not match any catalogued state actor precisely — further analysis ongoing.', type: 'conflicting', tag: 'UNVERIFIED', tagClass: 'tag-amber', delay: 4000 },
+  { sender: 'STATE DEPT', text: 'North Korea denies involvement via third-party diplomatic channel. Statement reads: "The DPRK did not authorize this launch and condemns the use of nuclear weapons against any nation." Credibility of statement: unknown.', type: 'conflicting', tag: 'DIPLOMATIC', tagClass: 'tag-amber', delay: 8000 },
+  { sender: 'PENTAGON', text: 'SecAF reports: no allied aircraft or satellite systems were in position to intercept or observe the actual launch point. The trajectory data we have is from post-ignition tracking only.', type: '', tag: 'INTEL GAP', tagClass: 'tag-amber', delay: 14000 },
+  { sender: 'SITUATION ROOM', text: 'The President is advised: under the Nuclear Non-Proliferation Treaty, a retaliatory strike must be authorized within the decision window. Congressional leaders have been notified and are en route to secure facilities.', type: 'critical', tag: 'PRESIDENTIAL', tagClass: 'tag-red', delay: 20000 },
+];
+
+function startIntelFeed() {
+  AUTO_INTEL.forEach(item => {
+    setTimeout(() => {
+      if (!state.launched) addIntel(item.sender, item.text, item.type, item.tagClass, item.tag);
+    }, item.delay);
+  });
+}
+
+function addIntel(sender, text, type='', tagClass='tag-amber', tag='') {
+  const feed = document.getElementById('intel-feed');
+  const msg = document.createElement('div');
+  msg.className = 'intel-message';
+
+  const now = new Date();
+  const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')} EST`;
+
+  msg.innerHTML = `
+    <div class="intel-header">
+      <span class="intel-sender">${sender}</span>
+      <span>${timeStr}</span>
+    </div>
+    <div class="intel-body ${type}">${text}</div>
+    ${tag ? `<span class="intel-tag ${tagClass}">${tag}</span>` : ''}
+  `;
+  feed.appendChild(msg);
+  msg.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ============================================================
+//  BRIEFING MODAL
+// ============================================================
+let currentAdvisorId = null;
+
+function openBriefing(advisorId) {
+  const adv = ADVISORS.find(a => a.id === advisorId);
+  const idx = state.briefingIndex[advisorId] || 0;
+  
+  if (idx >= adv.briefings.length) {
+    addIntel('SYSTEM', `${adv.name} has no further intelligence to provide.`, '', 'tag-amber', 'EXHAUSTED');
+    return;
+  }
+
+  currentAdvisorId = advisorId;
+  const briefing = adv.briefings[idx];
+
+  document.getElementById('b-name').textContent = adv.name;
+  document.getElementById('b-title').textContent = adv.title + ' — CLASSIFIED BRIEFING';
+  document.getElementById('b-text').textContent = `"${briefing.text}"`;
+  document.getElementById('b-rec').textContent = briefing.rec;
+
+  document.getElementById('briefing-modal').classList.add('show');
+}
+
+function closeBriefing() {
+  document.getElementById('briefing-modal').classList.remove('show');
+  currentAdvisorId = null;
+}
+
+function trustAdvisor() {
+  if (!currentAdvisorId) return;
+  const adv = ADVISORS.find(a => a.id === currentAdvisorId);
+  const idx = state.briefingIndex[currentAdvisorId] || 0;
+  const briefing = adv.briefings[idx];
+
+  // Add evidence
+  if (briefing.evidenceAdded && !state.evidenceList.includes(briefing.evidenceAdded)) {
+    state.evidenceList.push(briefing.evidenceAdded);
+    renderEvidence();
+  }
+
+  // Auto-select target if advisor has one and it's trusted
+  if (briefing.target) {
+    const suspect = SUSPECTS.find(s => s.name === briefing.target);
+    if (suspect) {
+      addIntel(adv.name.split(' ').pop(), `Intel accepted. Updating threat assessment — ${briefing.target} probability elevated.`, 'conflicting', 'tag-amber', 'INTEL ACCEPTED');
+    }
+  } else {
+    addIntel(adv.name.split(' ').pop(), `Intel accepted. Strike recommendation: WITHHOLD. Further verification counseled.`, '', 'tag-green', 'CAUTION');
+  }
+
+  // Advance briefing index
+  state.briefingIndex[currentAdvisorId] = idx + 1;
+  if (!state.trustedAdvisors.includes(currentAdvisorId)) state.trustedAdvisors.push(currentAdvisorId);
+
+  renderAdvisors();
+  renderTrustDisplay();
+  closeBriefing();
+}
+
+function dismissAdvisor() {
+  if (!currentAdvisorId) return;
+  const adv = ADVISORS.find(a => a.id === currentAdvisorId);
+  const idx = state.briefingIndex[currentAdvisorId] || 0;
+
+  addIntel('SYSTEM', `Intel from ${adv.name} disregarded by presidential order.`, '', 'tag-red', 'DISREGARDED');
+  state.briefingIndex[currentAdvisorId] = idx + 1;
+  if (!state.dismissedAdvisors.includes(currentAdvisorId)) state.dismissedAdvisors.push(currentAdvisorId);
+  
+  renderAdvisors();
+  closeBriefing();
+}
+
+function showAllAdvisors() {
+  addIntel('SITUATION ROOM', 'Cabinet session called. All advisors standing by for Presidential inquiry. Select an advisor on the left panel to receive their briefing.', '', 'tag-amber', 'SESSION ACTIVE');
+}
+
+// ============================================================
+//  TRUST DISPLAY & EVIDENCE
+// ============================================================
+function renderTrustDisplay() {
+  const el = document.getElementById('trust-display');
+  let html = '<h4>ADVISOR RELIABILITY INDEX</h4>';
+  ADVISORS.forEach(adv => {
+    const trusted = state.trustedAdvisors.includes(adv.id);
+    const dismissed = state.dismissedAdvisors.includes(adv.id);
+    let status = '';
+    if (trusted) status = ' <span style="color:var(--green-bright);font-size:9px;">✓ TRUSTED</span>';
+    if (dismissed) status = ' <span style="color:var(--red);font-size:9px;">✗ DISMISSED</span>';
+    html += `<div class="trust-row">
+      <span class="trust-name" style="font-size:10px;">${adv.name.split(' ').slice(-1)[0]}${status}</span>
+      <span class="trust-pct">${adv.trustLevel}%</span>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function renderEvidence() {
+  const el = document.getElementById('evidence-list');
+  if (state.evidenceList.length === 0) {
+    el.innerHTML = '<div class="evidence-item" style="color:var(--text-dim);font-size:10px;">No conclusive evidence yet.</div>';
+    return;
+  }
+  el.innerHTML = state.evidenceList.map(e => `<div class="evidence-item">— ${e}</div>`).join('');
+}
+
+// ============================================================
+//  LAUNCH STRIKE
+// ============================================================
+function launchStrike() {
+  if (state.launched || !state.selectedTarget) return;
+  state.launched = true;
+  clearInterval(state.timerInterval);
+
+  const target = state.selectedTarget;
+  const guilty = target.actualGuilty;
+
+  // Build outcome based on trusted/dismissed advisors
+  const trustedReliable = state.trustedAdvisors.filter(id => ADVISORS.find(a=>a.id===id && a.reliable));
+  const trustedUnreliable = state.trustedAdvisors.filter(id => ADVISORS.find(a=>a.id===id && !a.reliable));
+  const dismissedReliable = state.dismissedAdvisors.filter(id => ADVISORS.find(a=>a.id===id && a.reliable));
+  
+  let outcome, body, details;
+
+  if (guilty) {
+    if (trustedReliable.length >= 2 && dismissedReliable.length === 0) {
+      outcome = 'AUTHORIZED. TARGET CONFIRMED.';
+      body = 'The retaliatory strike was surgically executed. Subsequent NSA forensic analysis confirms: Russia's GRU orchestrated the attack using a stolen North Korean payload signature — a calculated gamble that you would obliterate the wrong country. You didn't.';
+      details = 'OUTCOME: CORRECT TARGET IDENTIFIED\nRussian state assets scrambled to deny involvement. Three senior GRU officers were liquidated within 48 hours of the strike — internal purge to bury the operation.\nNATO Article 5 invoked. Global standing: MAINTAINED.';
+    } else {
+      outcome = 'STRIKE AUTHORIZED.';
+      body = 'You struck the right country — but for partially wrong reasons, guided by conflicting and at times manufactured intelligence. The world's confidence in American restraint has been shaken. History will record the outcome as correct. The method, less so.';
+      details = 'OUTCOME: CORRECT TARGET — FLAWED PROCESS\nSeveral key advisors whose warnings you dismissed were later vindicated.\nNSC review ordered. Congressional hearings scheduled.';
+    }
+  } else {
+    if (target.id === 'nk') {
+      outcome = 'CATASTROPHIC ERROR.';
+      body = 'North Korea retaliated within eleven minutes of your strike. They had nothing to do with the original attack. The real perpetrator — Russia's GRU — watched from a secure facility outside Moscow as two nuclear arsenals exchanged fire over a lie they had constructed.';
+      details = 'OUTCOME: WRONG TARGET STRUCK\nNorth Korea launches three warheads in retaliation.\nRussia denies involvement. CIA later confirms: the entire incident was a GRU false-flag operation to destabilize the Pacific.\nCasualties: classified. Your legacy: a war that didn't have to happen.';
+    } else {
+      outcome = 'CATASTROPHIC ERROR.';
+      body = `${target.name} had no involvement in the attack. Your intelligence was manipulated. The true perpetrators — Russia's GRU — engineered every piece of evidence you were fed through compromised channels. You held the briefcase. They held the string.`;
+      details = `OUTCOME: WRONG TARGET STRUCK\n${target.name} retaliates through proxy channels.\nNSA forensic analysis: all intelligence pointing to ${target.name} was fabricated.\nThe war that follows will not be won.`;
+    }
+  }
+
+  setTimeout(() => showOutcome(outcome, guilty, body, details), 800);
+}
+
+function showOutcome(title, success, body, details) {
+  const el = document.getElementById('outcome');
+  document.getElementById('outcome-title').textContent = title;
+  document.getElementById('outcome-title').className = 'outcome-title ' + (success ? 'success' : 'failure');
+  document.getElementById('outcome-body').textContent = body;
+  document.getElementById('outcome-details').textContent = details;
+  el.classList.add('show');
+}
+
+function restartGame() {
+  state = {
+    timer: 480,
+    timerInterval: null,
+    selectedTarget: null,
+    selectedAdvisor: null,
+    advisorBriefCounts: {},
+    trustedAdvisors: [],
+    dismissedAdvisors: [],
+    evidenceList: [],
+    briefingIndex: {},
+    launched: false
+  };
+
+  document.getElementById('outcome').classList.remove('show');
+  document.getElementById('intel-feed').innerHTML = '<div class="panel-title">LIVE INTEL FEED</div>';
+  document.getElementById('decision-target').textContent = 'NO TARGET SELECTED';
+  document.getElementById('decision-target').classList.add('empty');
+  document.getElementById('launch-btn').disabled = true;
+  document.getElementById('timer').classList.remove('urgent');
+  document.querySelectorAll('.suspect-card').forEach(c => c.classList.remove('selected'));
+
+  initGame();
+}
+</script>
+</body>
+</html>
